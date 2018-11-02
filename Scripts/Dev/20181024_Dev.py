@@ -1,3 +1,10 @@
+# TODO split SMA and FMA into new columns
+# TODO add time back to output
+# TODO create a database that will feed powerbi with tick data and results
+
+
+
+
 import xlsxwriter
 import numpy as np
 import pandas as pd

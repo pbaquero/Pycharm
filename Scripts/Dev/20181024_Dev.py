@@ -1,7 +1,9 @@
 # TODO split SMA and FMA into new columns
 # TODO add time back to output
 # TODO create a database that will feed powerbi with tick data and results
-
+# TODO check other datapoints - currently using rolling mean of close rolling(fma_window).mean()
+# TODO deal with equity
+# TODO pull out arrays into a single location and rationalize definition
 
 
 
@@ -12,6 +14,7 @@ import matplotlib.pyplot as plt
 import sys
 from string import digits
 import os
+import time
 '''
 import mpl_finance
 from mpl_finance import candlestick_ohlc
@@ -36,7 +39,8 @@ class Master_Activity:
                                                 ('Stop_Loss_Bid_TID', 'int32'), ('Max_DD', 'float64'),
                                                 ('Max_DD_TID', 'int32'),
                                                 ('Max_DD_Bid', 'float64'), ('Stop_Loss_Max_DD', 'float64'),
-                                                ('Stop_Loss_Max_DD_TID', 'int32'), ('Stop_Loss_Max_DD_Bid', 'float64')])
+                                                ('Stop_Loss_Max_DD_TID', 'int32'), ('Stop_Loss_Max_DD_Bid', 'float64'),
+                                                ('SMA', 'float64'), ('FMA', 'float64'), ('StopLoss', 'float64')])
 
     def app_activity(self):
         arr_test_name = np.full(trading_test.activity[1:].shape, trading_test.name, dtype='S100')
@@ -47,9 +51,13 @@ class Master_Activity:
                                   ('Profit', 'float64'), ('Stop_Loss_Floor', 'float64'), ('Stop_Loss_Bid', 'float64'),
                                   ('Stop_Loss_Bid_TID', 'int32'), ('Max_DD', 'float64'), ('Max_DD_TID', 'int32'),
                                   ('Max_DD_Bid', 'float64'), ('Stop_Loss_Max_DD', 'float64'),
-                                  ('Stop_Loss_Max_DD_TID', 'int32'), ('Stop_Loss_Max_DD_Bid', 'float64')])
+                                  ('Stop_Loss_Max_DD_TID', 'int32'), ('Stop_Loss_Max_DD_Bid', 'float64'),
+                                  ('SMA', 'float64'), ('FMA', 'float64'), ('StopLoss', 'float64')])
 
         new_arr[:]['Test_Name'] = arr_test_name[:]
+        new_arr[:]['SMA'] = trading_test.activity[1:]['SMA']
+        new_arr[:]['FMA'] = trading_test.activity[1:]['FMA']
+        new_arr[:]['StopLoss'] = trading_test.activity[1:]['StopLoss']
         new_arr[:]['Trade'] = trading_test.activity[1:]['Trade']
         new_arr[:]['Ask'] = trading_test.activity[1:]['Ask']
         new_arr[:]['Ask_TID'] = trading_test.activity[1:]['Ask_TID']
@@ -80,18 +88,18 @@ class Master_Activity:
 
         df_out['Test_Name'] = df_out['Test_Name'].str.decode('utf-8')
 
-        df_out['Test'], df_out['StopLoss'] = df_out['Test_Name'].str.split('SL', 1).str
+        #df_out['Test'], df_out['StopLoss'] = df_out['Test_Name'].str.split('SL', 1).str
 
-        df_out['StopLoss_New'] = df_out['StopLoss'].str.replace('None', '0')
+        #df_out['StopLoss_New'] = df_out['StopLoss'].str.replace('None', '0')
 
-        df_out['Test_Original'] = df_out['Test_Name']
+        #df_out['Test_Original'] = df_out['Test_Name']
 
-        df_out['TestName_Strip'] = df_out['Test'].str.replace('test', '')
+        #df_out['TestName_Strip'] = df_out['Test'].str.replace('test', '')
 
-        df_out['TestName_New'] = df_out['TestName_Strip'].str.lstrip(digits)
+        #df_out['TestName_New'] = df_out['TestName_Strip'].str.lstrip(digits)
 
-        writer = pd.ExcelWriter('C:\\Users\\pebaqu\\Desktop\Personal\\Python\\JupyterExports\\master_activity_new.xlsx')
-        strFile = 'C:\\Users\\pebaqu\\Desktop\Personal\\Python\\JupyterExports\\master_activity.xlsx'
+        writer = pd.ExcelWriter('C:\\Users\\pebaqu\\Desktop\Personal\\Python\\JupyterExports\\master_activity_master_activity_'+time.strftime("%Y%m%d-%H%M%S")+'.xlsx')
+        strFile = 'C:\\Users\\pebaqu\\Desktop\Personal\\Python\\JupyterExports\\master_activity_'+time.strftime("%Y%m%d-%H%M%S")+'.xlsx'
         if os.path.isfile(strFile):
             os.remove(strFile)  # Opt.: os.system("rm "+strFile)
         df_out.to_excel(writer, 'Sheet1')
@@ -118,19 +126,22 @@ class Account:
                                               ('Stop_Loss_Bid_TID', 'int32'), ('Max_DD', 'float64'),
                                               ('Max_DD_TID', 'int32'),
                                               ('Max_DD_Bid', 'float64'), ('Stop_Loss_Max_DD', 'float64'),
-                                              ('Stop_Loss_Max_DD_TID', 'int32'), ('Stop_Loss_Max_DD_Bid', 'float64')])
+                                              ('Stop_Loss_Max_DD_TID', 'int32'), ('Stop_Loss_Max_DD_Bid', 'float64'),
+                                              ('SMA', 'float64'), ('FMA', 'float64'), ('StopLoss', 'float64')])
         self.new_activity = np.empty_like(self.activity)
         self.buy_start = 0
         self.buy_end = 0
         self.stop_loss = None  # define stop loss for reporting
 
-    def buy(self, amt, arr_analysis_iter):
+    def buy(self, amt, arr_analysis_iter, sma, fma):
         # you buy at the ask and sell at the bid (quoted from perspective of market maker)
 
         # pull arr_analysis tuple to assign variable values
         ask = arr_analysis[arr_analysis_iter]['Ask']
         TID = arr_analysis[arr_analysis_iter]['TID']
         self.buy_start = arr_analysis_iter
+        self.new_activity[0]['SMA'] = sma
+        self.new_activity[0]['FMA'] = fma
 
         # calculate the buy
         self.units = int(amt / ask)  # calcluate units per trade at amount
@@ -150,6 +161,7 @@ class Account:
     def sell(self, arr_analysis_iter, stop_loss=None):
 
         self.stop_loss = stop_loss
+        self.new_activity[0]['StopLoss'] = stop_loss
 
         # pull arr_analysis tuple to assign variable values
         bid = arr_analysis[arr_analysis_iter]['Bid']  # pull the current Bid (what you can sell for)
@@ -443,7 +455,7 @@ slow_ma = [int(i * length) for i in slow_moving_percents]
 
 for sma in slow_ma:
     df_usd_jpy['Bid_SSMA' + str(sma)] = df_usd_jpy['Bid_Close'].rolling(sma).mean()
-    # print(sma, [int(sma*fma) for fma in fast_moving_percents])
+
     for fma in fast_moving_percents:
         fma_window = int(sma * fma)
         df_usd_jpy['Bid_FSMA' + str(fma_window)] = df_usd_jpy['Bid_Close'].rolling(fma_window).mean()
@@ -474,15 +486,16 @@ for sma in slow_ma:
     for z in range(len(stop_loss)):
 
         for fma in fma_val:
-            trading_test = Account('test' + str(arr_iterator) + "Bid_SSMA" + str(sma) + "Bid_FSMA" + str(fma) + "SL" + str(
-                stop_loss[stop_loss_iter]), 50000, 0)
+            trading_test = Account('test' + str(arr_iterator), 50000, 0)
+            #trading_test = Account('test' + str(arr_iterator) + "Bid_SSMA" + str(sma) + "Bid_FSMA" + str(fma) + "SL" + str(
+            #    stop_loss[stop_loss_iter]), 50000, 0)
             arr_analysis_iter = 0
 
             for x in np.ndenumerate(arr_analysis):
 
                 if (arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] < arr_analysis[arr_analysis_iter][
                     'Bid_FSMA' + str(fma)] and trading_test.buy_status == 1):
-                    trading_test.buy(1000, arr_analysis_iter)
+                    trading_test.buy(1000, arr_analysis_iter, sma, fma)
 
                 elif (arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] > arr_analysis[arr_analysis_iter][
                     'Bid_FSMA' + str(fma)] and trading_test.sell_status == 1):

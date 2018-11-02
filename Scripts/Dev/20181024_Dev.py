@@ -4,6 +4,7 @@
 # TODO check other datapoints - currently using rolling mean of close rolling(fma_window).mean()
 # TODO deal with equity
 # TODO pull out arrays into a single location and rationalize definition
+# TODO take absolute values for profit and maxdd
 
 
 
@@ -88,21 +89,20 @@ class Master_Activity:
 
         df_out['Test_Name'] = df_out['Test_Name'].str.decode('utf-8')
 
-        #df_out['Test'], df_out['StopLoss'] = df_out['Test_Name'].str.split('SL', 1).str
+        df_source_ask = df_usd_jpy[['TID', 'Time', 'Ask_Open', 'Ask_High', 'Ask_Low', 'Ask_Close']]
 
-        #df_out['StopLoss_New'] = df_out['StopLoss'].str.replace('None', '0')
+        df_source_bid = df_usd_jpy[['TID', 'Time', 'Bid_Open', 'Bid_High', 'Bid_Low', 'Bid_Close']]
 
-        #df_out['Test_Original'] = df_out['Test_Name']
+        df_out.set_index('Ask_TID', inplace = True).join(df_source_ask.set_index('TID', inplace = True))
 
-        #df_out['TestName_Strip'] = df_out['Test'].str.replace('test', '')
-
-        #df_out['TestName_New'] = df_out['TestName_Strip'].str.lstrip(digits)
+        df_out.set_index('Bid_TID', inplace=True).join(df_source_bid.set_index('TID', inplace = True))
 
         writer = pd.ExcelWriter('C:\\Users\\pebaqu\\Desktop\Personal\\Python\\JupyterExports\\master_activity_master_activity_'+time.strftime("%Y%m%d-%H%M%S")+'.xlsx')
         strFile = 'C:\\Users\\pebaqu\\Desktop\Personal\\Python\\JupyterExports\\master_activity_'+time.strftime("%Y%m%d-%H%M%S")+'.xlsx'
         if os.path.isfile(strFile):
             os.remove(strFile)  # Opt.: os.system("rm "+strFile)
-        df_out.to_excel(writer, 'Sheet1')
+        df_out.to_excel(writer, 'Results')
+        df_usd_jpy.to_excel(writer, 'SourceData')
         writer.save()
 
 
@@ -440,6 +440,7 @@ class Reporting:
 USD_JPY_df = pd.read_pickle(
     "C:/Users/pebaqu/OneDrive - SAS/Profiles for l10c581/l10c581/Desktop/Personal/Python/Datasets/2018-07-01_USD_JPY")
 
+global df_usd_jpy
 df_usd_jpy = USD_JPY_df.drop(['Complete', 'Time', 'Volume'], axis=1).copy()
 df_usd_jpy.reset_index(inplace=True)
 df_usd_jpy['TID'] = df_usd_jpy.index

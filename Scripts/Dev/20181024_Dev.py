@@ -16,6 +16,14 @@ import sys
 from string import digits
 import os
 import time
+from sqlalchemy import create_engine, MetaData
+import psycopg2
+import io
+
+dw = 'postgresql://postgres:!QAZxsw2@localhost:5432/PythonForex'
+dw = create_engine(dw)
+timestamp = time.strftime("%Y%m%d_%H%M%S")
+
 '''
 import mpl_finance
 from mpl_finance import candlestick_ohlc
@@ -28,6 +36,30 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.ticker as mticker
 
 '''
+
+
+def to_pg(df, asset_name):
+    table_name = asset_name
+    data = io.StringIO()
+    df.to_csv(data, header=False, index=False)
+    data.seek(0)
+    raw = dw.raw_connection()
+    curs = raw.cursor()
+    curs.execute("select exists(select * from information_schema.tables where table_name=%s)", ('table_name',))
+    if curs.fetchone()[0] is True:
+        curs.execute("DROP TABLE " + table_name)
+    empty_table = pd.io.sql.get_schema(df, table_name, con=dw)
+    empty_table = empty_table.replace('"', '')
+    curs.execute(empty_table)
+    curs.copy_from(data, table_name, sep=',', null = '')
+    curs.connection.commit()
+
+
+def pg_query(query):
+    raw = dw.raw_connection()
+    curs = raw.cursor()
+    curs.execute(query)
+    curs.connection.commit()
 
 
 class Master_Activity:
@@ -84,26 +116,24 @@ class Master_Activity:
         df_out = pd.DataFrame(data=self.arr_master,  # values
                               columns=self.arr_master.dtype.names)
 
-        # create final data elements/id's
-        df_out.reset_index(inplace=True)
-
         df_out['Test_Name'] = df_out['Test_Name'].str.decode('utf-8')
 
-        df_source_ask = df_usd_jpy[['TID', 'Time', 'Ask_Open', 'Ask_High', 'Ask_Low', 'Ask_Close']]
+        result_table = 'df_usd_jpy' + timestamp
+        base_table = 'df_usd_jpy_base' + timestamp
 
-        df_source_bid = df_usd_jpy[['TID', 'Time', 'Bid_Open', 'Bid_High', 'Bid_Low', 'Bid_Close']]
+        to_pg(df_out, result_table)
 
-        df_out.set_index('Ask_TID', inplace = True).join(df_source_ask.set_index('TID', inplace = True))
+        query = ('Create table Final_Results' + timestamp + ' as SELECT '
+                'a.* '
+                ',b.Time as BidTime ,b.Bid_Open ,b.Bid_High ,b.Bid_Low ,b.Bid_Close '
+                ',c.Time as AskTime ,c.Ask_Open ,c.Ask_High ,c.Ask_Low ,c.Ask_Close '
+                'FROM ' + result_table + ' as a '
+                'left join ' + base_table + ' as b '
+                'on a.Bid_TID = b.TID '
+                'left join ' + base_table + ' as c '
+                'on a.Ask_TID = c.TID;')
 
-        df_out.set_index('Bid_TID', inplace=True).join(df_source_bid.set_index('TID', inplace = True))
-
-        writer = pd.ExcelWriter('C:\\Users\\pebaqu\\Desktop\Personal\\Python\\JupyterExports\\master_activity_master_activity_'+time.strftime("%Y%m%d-%H%M%S")+'.xlsx')
-        strFile = 'C:\\Users\\pebaqu\\Desktop\Personal\\Python\\JupyterExports\\master_activity_'+time.strftime("%Y%m%d-%H%M%S")+'.xlsx'
-        if os.path.isfile(strFile):
-            os.remove(strFile)  # Opt.: os.system("rm "+strFile)
-        df_out.to_excel(writer, 'Results')
-        df_usd_jpy.to_excel(writer, 'SourceData')
-        writer.save()
+        pg_query(query)
 
 
 class Account:
@@ -462,6 +492,10 @@ for sma in slow_ma:
         df_usd_jpy['Bid_FSMA' + str(fma_window)] = df_usd_jpy['Bid_Close'].rolling(fma_window).mean()
 
 df_usd_jpy.rename(columns={'BidAvg': 'Bid', 'AskAvg': 'Ask'}, inplace=True)
+
+asset_name = 'df_usd_jpy_base'+timestamp
+
+to_pg(df_usd_jpy, asset_name)
 
 arr_ip = [tuple(i) for i in df_usd_jpy.values]
 

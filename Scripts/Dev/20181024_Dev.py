@@ -5,6 +5,7 @@
 # TODO deal with equity
 # TODO pull out arrays into a single location and rationalize definition
 # TODO take absolute values for profit and maxdd
+# TODO mix and match slow and fast trends across time scales (e.g. 5 second fast with 1 minute slow)
 
 
 

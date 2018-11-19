@@ -20,6 +20,7 @@ import time
 from sqlalchemy import create_engine, MetaData
 import psycopg2
 import io
+import ta
 
 dw = 'postgresql://postgres:!QAZxsw2@localhost:5432/PythonForex'
 dw = create_engine(dw)
@@ -37,6 +38,25 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.ticker as mticker
 
 '''
+
+
+def ToT_Trend(row):
+    if row['Prev_Bid_Close'] < row['Bid_Open']:
+        val = 1
+    elif row['Prev_Bid_Close'] > row['Bid_Open']:
+        val = -1
+    else:
+        val = 0
+    return val
+
+def Trend(row):
+    if row['Bid_Close'] < row['Bid_Open']:
+        val = 1
+    elif row['Bid_Close'] > row['Bid_Open']:
+        val = -1
+    else:
+        val = 0
+    return val
 
 
 def to_pg(df, asset_name):
@@ -308,7 +328,7 @@ class Account:
               self.activity,
               sep='\n')
 
-
+'''
 class Metrics:
     def __init__(self, sma, fma):
         self.sma = sma
@@ -340,7 +360,7 @@ class Metrics:
         global arr_analysis
 
         arr_analysis = np.array(arr_ip, dtype=dtyp)
-
+'''
 
 class Reporting:
     def __init__(self):
@@ -480,17 +500,41 @@ length = max(df_usd_jpy['TID']) + 1
 df_usd_jpy['BidAvg'] = df_usd_jpy[['Bid_Open', 'Bid_High', 'Bid_Low', 'Bid_Close']].mean(axis=1)
 df_usd_jpy['AskAvg'] = df_usd_jpy[['Ask_Open', 'Ask_High', 'Ask_Low', 'Ask_Close']].mean(axis=1)
 
+
+df_usd_jpy['Bid_AO'] = ta.momentum.ao(df_usd_jpy.Bid_High, df_usd_jpy.Bid_Low)
+df_usd_jpy['Ask_AO'] = ta.momentum.ao(df_usd_jpy.Ask_High, df_usd_jpy.Ask_Low)
+
+''' Original MACD calc
+df_usd_jpy['Bid_MACD'] = ta.trend.macd(df_usd_jpy.Bid_Close, n_fast=12, n_slow=26)
+df_usd_jpy['Ask_MACD'] = ta.trend.macd(df_usd_jpy.Ask_Close, n_fast=12, n_slow=26)
+
+
+df_usd_jpy['Bid_MACD_Sig'] = ta.trend.macd_signal(df_usd_jpy.Bid_Close, n_fast=12, n_slow=26, n_sign=9)
+df_usd_jpy['Ask_MACD_Sig'] = ta.trend.macd_signal(df_usd_jpy.Ask_Close, n_fast=12, n_slow=26, n_sign=9)
+'''
+
+df_usd_jpy['Prev_Bid_Close'] = df_usd_jpy['Bid_Close'].shift(-1)
+df_usd_jpy['Prev_Ask_Close'] = df_usd_jpy['Ask_Close'].shift(-1)
+
+df_usd_jpy["Bid_ToT_Trend"] = df_usd_jpy.apply(ToT_Trend, axis = 1)
+
+df_usd_jpy["Bid_Trend"] = df_usd_jpy.apply(Trend, axis = 1)
+
+
 slow_moving_percents = [.05, .10, .15, .20, .25, .30, .35, .40, .45, .50]
 fast_moving_percents = [.05, .10, .15, .20, .25, .30, .35, .40, .45, .50]
 
 slow_ma = [int(i * length) for i in slow_moving_percents]
 
 for sma in slow_ma:
-    df_usd_jpy['Bid_SSMA' + str(sma)] = df_usd_jpy['Bid_Close'].rolling(sma).mean()
+    #df_usd_jpy['Bid_SSMA' + str(sma)] = df_usd_jpy['Bid_Close'].rolling(sma).mean()
+
 
     for fma in fast_moving_percents:
         fma_window = int(sma * fma)
-        df_usd_jpy['Bid_FSMA' + str(fma_window)] = df_usd_jpy['Bid_Close'].rolling(fma_window).mean()
+        #df_usd_jpy['Bid_FSMA' + str(fma_window)] = df_usd_jpy['Bid_Close'].rolling(fma_window).mean()
+        df_usd_jpy['Bid_MACD_S' + str(sma) + 'F' + str(fma_window)] = ta.trend.macd(df_usd_jpy.Bid_Close, n_fast=fma_window, n_slow=sma)
+        df_usd_jpy['Bid_MACD_Sig_S' + str(sma) + 'F' + str(fma_window)] = ta.trend.macd_signal(df_usd_jpy.Bid_Close, n_fast=fma_window, n_slow=sma, n_sign=9)
 
 df_usd_jpy.rename(columns={'BidAvg': 'Bid', 'AskAvg': 'Ask'}, inplace=True)
 
@@ -511,9 +555,15 @@ master_act = Master_Activity()
 
 arr_iterator = 0
 
+#(arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] < arr_analysis[arr_analysis_iter][
+                    #'Bid_FSMA' + str(fma)] and trading_test.buy_status == 1):
+
+#(arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] > arr_analysis[arr_analysis_iter][
+#                    'Bid_FSMA' + str(fma)] and trading_test.sell_status == 1):
+
 for sma in slow_ma:
 
-    stop_loss = [3.75]
+    stop_loss = []
 
     stop_loss_iter = 0
 
@@ -529,12 +579,14 @@ for sma in slow_ma:
 
             for x in np.ndenumerate(arr_analysis):
 
-                if (arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] < arr_analysis[arr_analysis_iter][
-                    'Bid_FSMA' + str(fma)] and trading_test.buy_status == 1):
+                if (arr_analysis[arr_analysis_iter]['Bid_MACD_S' + str(sma) + 'F' + str(fma_window)] <
+                    arr_analysis[arr_analysis_iter]['Bid_MACD_Sig_S' + str(sma) + 'F' + str(fma_window)]
+                    and trading_test.buy_status == 1):
                     trading_test.buy(1000, arr_analysis_iter, sma, fma)
 
-                elif (arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] > arr_analysis[arr_analysis_iter][
-                    'Bid_FSMA' + str(fma)] and trading_test.sell_status == 1):
+                elif (arr_analysis[arr_analysis_iter]['Bid_MACD_S' + str(sma) + 'F' + str(fma_window)] >
+                      arr_analysis[arr_analysis_iter]['Bid_MACD_Sig_S' + str(sma) + 'F' + str(fma_window)]
+                      and trading_test.sell_status == 1):
                     trading_test.sell(arr_analysis_iter, stop_loss[stop_loss_iter])
 
                 arr_analysis_iter += 1

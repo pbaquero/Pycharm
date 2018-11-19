@@ -39,6 +39,35 @@ df_usd_jpy['Ask_MACD_Sig'] = ta.trend.macd_signal(df_usd_jpy.Ask_Close, n_fast=1
 
 df_test = df_usd_jpy[df_usd_jpy['Bid_MACD']<df_usd_jpy['Bid_MACD_Sig']]
 
+df_usd_jpy['Prev_Bid_Close'] = df_usd_jpy['Bid_Close'].shift(-1)
+df_usd_jpy['Prev_Ask_Close'] = df_usd_jpy['Ask_Close'].shift(-1)
+
+#df_usd_jpy["Bid_Trend"] = ["Up" if ele[0] < ele[1] else "Unknown" for ele in df_usd_jpy[['Bid_Open', 'Prev_Bid_Close']]]
+
+
+def ToT_Trend(row):
+    if row['Prev_Bid_Close'] < row['Bid_Open']:
+        val = 1
+    elif row['Prev_Bid_Close'] > row['Bid_Open']:
+        val = -1
+    else:
+        val = 0
+    return val
+
+def Trend(row):
+    if row['Bid_Close'] < row['Bid_Open']:
+        val = 1
+    elif row['Bid_Close'] > row['Bid_Open']:
+        val = -1
+    else:
+        val = 0
+    return val
+
+
+df_usd_jpy["Bid_ToT_Trend"] = df_usd_jpy.apply(ToT_Trend, axis = 1)
+
+df_usd_jpy["Bid_Trend"] = df_usd_jpy.apply(Trend, axis = 1)
+
 df_usd_jpy = df_usd_jpy[0:100]
 
 plt.plot(df_usd_jpy.Time, df_usd_jpy.Bid_MACD)

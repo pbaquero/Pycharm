@@ -1,6 +1,4 @@
-# TODO split SMA and FMA into new columns
 # TODO add time back to output
-# TODO create a database that will feed powerbi with tick data and results
 # TODO check other datapoints - currently using rolling mean of close rolling(fma_window).mean()
 # TODO deal with equity
 # TODO pull out arrays into a single location and rationalize definition
@@ -137,8 +135,13 @@ class Master_Activity:
         global df_out
         df_out = pd.DataFrame(data=self.arr_master,  # values
                               columns=self.arr_master.dtype.names)
-
+        #Fix name as byte issue
         df_out['Test_Name'] = df_out['Test_Name'].str.decode('utf-8')
+
+        #Create absolute value of profit, max dd columns
+        df_out['Abs_Profit'] = abs(df_out['Profit'])
+        df_out['Abs_Max_DD'] = abs(df_out['Max_DD'])
+        df_out['Test_Trade'] = df_out['Test_Name']+'_'+df_out['Trade'].astype(str)
 
         result_table = 'df_usd_jpy' + timestamp
         base_table = 'df_usd_jpy_base' + timestamp

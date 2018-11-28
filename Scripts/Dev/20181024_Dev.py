@@ -517,9 +517,9 @@ Length = [Len_2_Week, Len_Week, Len_Day]
 moving_percents = [.005, .01, .05, .10, .15, .20, .25, .30, .35, .40, .45, .50]
 
 #calcuate slow and fast values
-slow_values = [41460, 20730, 34550, 27640]
-fast_values = [2073, 10365, 8292, 6219, 9328, 1727, 4146, 9674, 2764]
-'''
+slow_values = []
+fast_values = []
+
 for length in Length:
     for per in moving_percents:
         slow_value_calc = int(per*length) if int(per*length) is not 0 else 1
@@ -528,7 +528,7 @@ for length in Length:
             slow_values.append(slow_value_calc)
         if fast_value_calc not in fast_values:
             fast_values.append(fast_value_calc)
-'''
+
 
 df_usd_jpy['BidAvg'] = df_usd_jpy[['Bid_Open', 'Bid_High', 'Bid_Low', 'Bid_Close']].mean(axis=1)
 df_usd_jpy['AskAvg'] = df_usd_jpy[['Ask_Open', 'Ask_High', 'Ask_Low', 'Ask_Close']].mean(axis=1)
@@ -562,17 +562,14 @@ to_pg(df_usd_jpy, asset_name)
 
 
 for sma in slow_values:
-    #df_usd_jpy['Bid_SSMA' + str(sma)] = df_usd_jpy['Bid_Close'].rolling(sma).mean()
+    df_usd_jpy['Bid_SSMA' + str(sma)] = df_usd_jpy['Bid_Close'].rolling(sma).mean()
 
     for fma in fast_values:
-
-        #df_usd_jpy['Bid_FSMA' + str(fma_window)] = df_usd_jpy['Bid_Close'].rolling(fma_window).mean()
         if fma < sma:
-            df_usd_jpy['Bid_MACD_S' + str(sma) + 'F' + str(fma)] = ta.trend.macd(df_usd_jpy.Bid_Close, n_fast=fma, n_slow=sma)
-            df_usd_jpy['Bid_MACD_Sig_S' + str(sma) + 'F' + str(fma)] = ta.trend.macd_signal(df_usd_jpy.Bid_Close, n_fast=fma, n_slow=sma, n_sign=9)
+            df_usd_jpy['Bid_FSMA' + str(fma)] = df_usd_jpy['Bid_Close'].rolling(fma).mean()
 
 
-df_usd_jpy.dropna(inplace = True)
+#df_usd_jpy.dropna(inplace = True)
 
 arr_ip = [tuple(i) for i in df_usd_jpy.values]
 
@@ -587,11 +584,18 @@ master_act = Master_Activity()
 
 arr_iterator = 0
 
-#(arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] < arr_analysis[arr_analysis_iter][
-                    #'Bid_FSMA' + str(fma)] and trading_test.buy_status == 1):
 
-#(arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] > arr_analysis[arr_analysis_iter][
-#                    'Bid_FSMA' + str(fma)] and trading_test.sell_status == 1):
+def test_trade(arr_analysis_iter, sma, fma):
+    if (arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] < arr_analysis[arr_analysis_iter][
+                    'Bid_FSMA' + str(fma)] and trading_test.buy_status == 1):
+
+        trading_test.buy(1000, arr_analysis_iter, sma, fma)
+
+    elif (arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] > arr_analysis[arr_analysis_iter][
+                    'Bid_FSMA' + str(fma)] and trading_test.sell_status == 1):
+
+        trading_test.sell(arr_analysis_iter, stop_loss[stop_loss_iter])
+
 
 for sma in slow_values:
 
@@ -606,21 +610,12 @@ for sma in slow_values:
         for fma in fast_values:
             if fma < sma:
                 trading_test = Account('test' + str(arr_iterator), 50000, 0)
-                #trading_test = Account('test' + str(arr_iterator) + "Bid_SSMA" + str(sma) + "Bid_FSMA" + str(fma) + "SL" + str(
-                #    stop_loss[stop_loss_iter]), 50000, 0)
+
                 arr_analysis_iter = 0
 
                 for x in np.ndenumerate(arr_analysis):
 
-                    if (arr_analysis[arr_analysis_iter]['Bid_MACD_S' + str(sma) + 'F' + str(fma)] <
-                        arr_analysis[arr_analysis_iter]['Bid_MACD_Sig_S' + str(sma) + 'F' + str(fma)]
-                        and trading_test.buy_status == 1):
-                        trading_test.buy(1000, arr_analysis_iter, sma, fma)
-
-                    elif (arr_analysis[arr_analysis_iter]['Bid_MACD_S' + str(sma) + 'F' + str(fma)] >
-                          arr_analysis[arr_analysis_iter]['Bid_MACD_Sig_S' + str(sma) + 'F' + str(fma)]
-                          and trading_test.sell_status == 1):
-                        trading_test.sell(arr_analysis_iter, stop_loss[stop_loss_iter])
+                    test_trade(arr_analysis_iter, sma, fma)
 
                     arr_analysis_iter += 1
 
@@ -629,7 +624,7 @@ for sma in slow_values:
                 report.populate_results()
                 arr_iterator += 1
 
-            stop_loss_iter += 1
+        stop_loss_iter += 1
 
 master_act.save_activity()
 

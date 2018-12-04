@@ -2,8 +2,11 @@
 # TODO check other datapoints - currently using rolling mean of close rolling(fma_window).mean()
 # TODO deal with equity
 # TODO pull out arrays into a single location and rationalize definition
-# TODO take absolute values for profit and maxdd
 # TODO mix and match slow and fast trends across time scales (e.g. 5 second fast with 1 minute slow)
+# TODO drop leading blank row
+# TODO fix maxx_dd with stop loss
+# Todo add time fields (hour, minute, second)
+# TODO explore pytables
 
 
 
@@ -75,9 +78,14 @@ def to_pg(df, asset_name):
     curs.connection.commit()
 
 
-def pg_query(query):
+def pg_query(query, table = None):
+    table_name = table
     raw = dw.raw_connection()
     curs = raw.cursor()
+    if table_name is not None:
+        curs.execute("select exists(select * from information_schema.tables where table_name=%s)", ('table_name',))
+        if curs.fetchone()[0] is True:
+            curs.execute("DROP TABLE " + table_name)
     curs.execute(query)
     curs.connection.commit()
 
@@ -140,7 +148,8 @@ class Master_Activity:
 
         #Create absolute value of profit, max dd columns
         df_out['Abs_Profit'] = abs(df_out['Profit'])
-        df_out['Abs_Max_DD'] = abs(df_out['Max_DD'])
+        #df_out['Abs_Max_DD'] = abs(df_out['Max_DD'])
+        df_out['Abs_Stop_Loss_Max_DD'] = abs(df_out['Stop_Loss_Max_DD'])
         df_out['Test_Trade'] = df_out['Test_Name']+'_'+df_out['Trade'].astype(str)
 
         result_table = 'df_usd_jpy' + timestamp
@@ -148,7 +157,7 @@ class Master_Activity:
 
         to_pg(df_out, result_table)
 
-        query = ('Create table Final_Results' + timestamp + ' as SELECT '
+        query_ts_results = ('Create table Final_Results' + timestamp + ' as SELECT '
                 'a.* '
                 ',b.Time as BidTime ,b.Bid_Open ,b.Bid_High ,b.Bid_Low ,b.Bid_Close '
                 ',c.Time as AskTime ,c.Ask_Open ,c.Ask_High ,c.Ask_Low ,c.Ask_Close '
@@ -158,7 +167,11 @@ class Master_Activity:
                 'left join ' + base_table + ' as c '
                 'on a.Ask_TID = c.TID;')
 
-        pg_query(query)
+        pg_query(query_ts_results)
+
+        query_current_results = ('Select *  into Results_Current from Final_Results' + timestamp + ';')
+
+        pg_query(query_current_results, 'Results_Current')
 
 
 class Account:
@@ -237,8 +250,7 @@ class Account:
         self.new_activity[0]['Max_DD'] = (min_bid * self.units) - self.equity  # calculate the max drawdown amount
         self.new_activity[0]['Max_DD_TID'] = min_bid_tid  # pull the TID for the max dd
         self.new_activity[0]['Max_DD_Bid'] = min_bid  # pull the bid associated with the max dd
-        self.new_activity[0]['Stop_Loss_Max_DD'] = (
-                                                               min_bid * self.units) - self.equity  # default stop loss max dd amount for graphing
+        self.new_activity[0]['Stop_Loss_Max_DD'] = (min_bid * self.units) - self.equity  # default stop loss max dd amount for graphing
         self.new_activity[0]['Stop_Loss_Max_DD_TID'] = min_bid_tid  # default stop loss max dd tid for graphing
         self.new_activity[0]['Stop_Loss_Max_DD_Bid'] = min_bid  # default stop loss max dd bid for graphing
 
@@ -247,8 +259,7 @@ class Account:
             self.new_activity[0]['Stop_Loss_Floor'] = stop_loss_floor
 
             # get array of all ticks where bid is gte to stop loss floor
-            arr_gte_stop_loss = np.squeeze(
-                np.take(arr_sub_analysis, np.where(arr_sub_analysis['Bid'] >= stop_loss_floor)))
+            arr_gte_stop_loss = np.squeeze(np.take(arr_sub_analysis, np.where(arr_sub_analysis['Bid'] >= stop_loss_floor)))
 
         if stop_loss is None or stop_loss > abs(self.new_activity[0]['Max_DD']):
             self.new_activity[0]['Bid'] = bid  # assign the parameter bid
@@ -271,8 +282,7 @@ class Account:
                 else:
                     stop_loss_bid_index = np.argmin(arr_gte_stop_loss['TID'])  # get the index of lowest acceptable bid
                     stop_loss_TID = np.amin(arr_gte_stop_loss['TID'])
-                    arr_stop_loss_bid = arr_gte_stop_loss[
-                        stop_loss_bid_index]  # the row of the lowest purchase price in the range of your purchase to sale
+                    arr_stop_loss_bid = arr_gte_stop_loss[stop_loss_bid_index]  # the row of the lowest purchase price in the range of your purchase to sale
                     stop_loss_bid = arr_stop_loss_bid['Bid']  # the ID of the lowest purchase price
 
                     self.new_activity[0]['Stop_Loss_Bid'] = stop_loss_bid
@@ -280,12 +290,9 @@ class Account:
                     self.new_activity[0]['Bid'] = stop_loss_bid
                     self.new_activity[0]['Bid_TID'] = stop_loss_TID
 
-                    self.new_activity[0]['Stop_Loss_Max_DD'] = (
-                                                                           stop_loss_bid * self.units) - self.equity  # calculate the max drawdown amount
-                    self.new_activity[0][
-                        'Stop_Loss_Max_DD_TID'] = stop_loss_TID  # this is actually the lowest bid and not the dd bid
-                    self.new_activity[0][
-                        'Stop_Loss_Max_DD_Bid'] = stop_loss_bid  # this is actually the lowest bid and not the dd bid
+                    self.new_activity[0]['Stop_Loss_Max_DD'] = (stop_loss_bid * self.units) - self.equity  # calculate the max drawdown amount
+                    self.new_activity[0]['Stop_Loss_Max_DD_TID'] = stop_loss_TID  # this is actually the lowest bid and not the dd bid
+                    self.new_activity[0]['Stop_Loss_Max_DD_Bid'] = stop_loss_bid  # this is actually the lowest bid and not the dd bid
 
                     self.calc_sale()
 
@@ -332,39 +339,6 @@ class Account:
               self.activity,
               sep='\n')
 
-'''
-class Metrics:
-    def __init__(self, sma, fma):
-        self.sma = sma
-        self.fma = fma
-
-    def stat_creation(self):
-        # Stat column creation
-        df_analysis['Bid_Fast_Avg'] = df_analysis.Bid.rolling(self.fma).mean()
-        df_analysis['Prev_Bid_Fast_Avg'] = df_analysis['Bid_Fast_Avg'].shift()
-        df_analysis['Bid_Slow_Avg'] = df_analysis.Bid.rolling(self.sma).mean()
-        df_analysis['Prev_Bid_Slow_Avg'] = df_analysis['Bid_Slow_Avg'].shift()
-        df_analysis['Ask_Fast_Avg'] = df_analysis.Ask.rolling(self.fma).mean()
-        df_analysis['Prev_Ask_Fast_Avg'] = df_analysis['Ask_Fast_Avg'].shift()
-        df_analysis['Ask_Slow_Avg'] = df_analysis.Ask.rolling(self.sma).mean()
-        df_analysis['Prev_Ask_Slow_Avg'] = df_analysis['Ask_Slow_Avg'].shift()
-        df_analysis['Spread_Fast_Avg'] = df_analysis.Bid_Ask_Spread.rolling(self.fma).mean()
-        df_analysis['Prev_Spread_Fast_Avg'] = df_analysis['Spread_Fast_Avg'].shift()
-        df_analysis['Spread_Slow_Avg'] = df_analysis.Bid_Ask_Spread.rolling(self.sma).mean()
-        df_analysis['Prev_Spread_Slow_Avg'] = df_analysis['Spread_Slow_Avg'].shift()
-
-        # Final analysis dataset creation
-        df_analysis_final = df_analysis.dropna()
-
-        # analysis array creation
-        arr_ip = [tuple(i) for i in df_analysis_final.values]
-
-        dtyp = np.dtype(list(zip(df_analysis_final.dtypes.index, df_analysis_final.dtypes)))
-
-        global arr_analysis
-
-        arr_analysis = np.array(arr_ip, dtype=dtyp)
-'''
 
 class Reporting:
     def __init__(self):
@@ -459,24 +433,6 @@ class Reporting:
 
         arr_results = np.append(arr_results, arr_new_results)
 
-        # Maximum Adverse Event
-        '''
-        f, ax = plt.subplots(figsize=(20, 10))
-        ax.scatter(abs(positive_trades['Stop_Loss_Max_DD']), abs(positive_trades['Profit']), marker="+", c="g")
-        ax.scatter(abs(negative_trades['Stop_Loss_Max_DD']), abs(negative_trades['Profit']), marker="o", c="r")
-
-        ax.plot(min(ax.get_ylim(), ax.get_xlim()), min(ax.get_ylim(), ax.get_xlim()), ls="--", c=".3")
-        ax.grid(color='g', linestyle='dashed', linewidth=1)
-        ax.set_xlim(xmin=0)
-        ax.set_ylim(ymin=0)
-        if trading_test.stop_loss is not None:
-            plt.axvline(x=trading_test.stop_loss)
-            plt.xlabel('Max Drawdown')
-            plt.ylabel('Profit ($)')
-            ax.set_title("Maximum Adverse Event \n Stop Loss:" + str(trading_test.stop_loss))
-        plt.savefig('C:\\Users\\pebaqu\\Desktop\Personal\\Python\\JupyterExports\\' + trading_test.name + '.png')
-        '''
-
     def create_final_report(self):
         # chart the results
 
@@ -500,6 +456,8 @@ df_usd_jpy = USD_JPY_df.drop(['Complete', 'Time', 'Volume'], axis=1).copy()
 df_usd_jpy.reset_index(inplace=True)
 df_usd_jpy['TID'] = df_usd_jpy.index
 
+#adds the hour to the dataframe
+df_usd_jpy['Bid_Hour'] = df_usd_jpy['Time'].dt.strftime("%H")
 #adds the week number to the dataframe
 df_usd_jpy['Week'] = df_usd_jpy['Time'].dt.strftime("%W")
 #adds the week number to the dataframe
@@ -532,6 +490,8 @@ for length in Length:
         if fast_value_calc not in fast_values:
             fast_values.append(fast_value_calc)
 
+slow_values = sorted(slow_values)
+fast_values = sorted(fast_values)
 
 df_usd_jpy['BidAvg'] = df_usd_jpy[['Bid_Open', 'Bid_High', 'Bid_Low', 'Bid_Close']].mean(axis=1)
 df_usd_jpy['AskAvg'] = df_usd_jpy[['Ask_Open', 'Ask_High', 'Ask_Low', 'Ask_Close']].mean(axis=1)
@@ -557,6 +517,9 @@ df_usd_jpy["Bid_ToT_Trend"] = df_usd_jpy.apply(ToT_Trend, axis = 1)
 df_usd_jpy["Bid_Trend"] = df_usd_jpy.apply(Trend, axis = 1)
 
 df_usd_jpy.rename(columns={'BidAvg': 'Bid', 'AskAvg': 'Ask'}, inplace=True)
+
+#subset data for only profitable trading hours
+df_usd_jpy = df_usd_jpy.loc[df_usd_jpy['Bid_Hour'].isin(['17', '18'])]
 
 asset_name = 'df_usd_jpy_base'+timestamp
 
@@ -588,7 +551,7 @@ master_act = Master_Activity()
 arr_iterator = 0
 
 
-def test_trade(arr_analysis_iter, sma, fma):
+def test_trade(arr_analysis_iter, sma, fma, sl):
     if (arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] < arr_analysis[arr_analysis_iter][
                     'Bid_FSMA' + str(fma)] and trading_test.buy_status == 1):
 
@@ -597,18 +560,18 @@ def test_trade(arr_analysis_iter, sma, fma):
     elif (arr_analysis[arr_analysis_iter]['Bid_SSMA' + str(sma)] > arr_analysis[arr_analysis_iter][
                     'Bid_FSMA' + str(fma)] and trading_test.sell_status == 1):
 
-        trading_test.sell(arr_analysis_iter, stop_loss[stop_loss_iter])
+        trading_test.sell(arr_analysis_iter, sl)
 
 
 for sma in slow_values:
 
-    stop_loss = [None]
+    stop_loss_values = [None, 0.25, 0.5, 0.75, 1.0, 3.0, 3.25, 3.5, 3.75, 4.0]
 
     stop_loss_iter = 0
 
     #fma_val = [int(sma * fma) for fma in fast_values]
 
-    for z in range(len(stop_loss)):
+    for sl in stop_loss_values:
 
         for fma in fast_values:
             if fma < sma:
@@ -618,7 +581,7 @@ for sma in slow_values:
 
                 for x in np.ndenumerate(arr_analysis):
 
-                    test_trade(arr_analysis_iter, sma, fma)
+                    test_trade(arr_analysis_iter, sma, fma, sl)
 
                     arr_analysis_iter += 1
 

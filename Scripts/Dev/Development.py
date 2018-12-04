@@ -7,6 +7,8 @@
 # TODO fix maxx_dd with stop loss
 # Todo add time fields (hour, minute, second)
 # TODO explore pytables
+# TODO add timer
+# TODO move stoploss from for statement to sell function
 
 
 
@@ -171,7 +173,7 @@ class Master_Activity:
 
         query_current_results = ('Select *  into Results_Current from Final_Results' + timestamp + ';')
 
-        pg_query(query_current_results, 'Results_Current')
+        pg_query(query_current_results, 'results_current')
 
 
 class Account:
